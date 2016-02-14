@@ -20,6 +20,7 @@ metadata {
 		capability "Polling"
 		capability "Refresh"
 		capability "Sensor"
+        capability "Switch"
 		capability "Thermostat Heating Setpoint"
 		
 		command "heatLevelUp"
@@ -42,17 +43,26 @@ metadata {
 				]
 			)
 		}
-		standardTile("heatLevelUp", "device.switch", canChangeIcon: false, inactiveLabel: true, decoration: "flat" ) {
+		standardTile("heatLevelUp", "device.switch", canChangeIcon: false, decoration: "flat" ) {
 			state("heatLevelUp",   action:"heatLevelUp",   icon:"st.thermostat.thermostat-up", backgroundColor:"#F7C4BA")
 		}  
-		standardTile("heatLevelDown", "device.switch", canChangeIcon: false, inactiveLabel: true, decoration: "flat") {
+		standardTile("heatLevelDown", "device.switch", canChangeIcon: false, decoration: "flat") {
 			state("heatLevelDown", action:"heatLevelDown", icon:"st.thermostat.thermostat-down", backgroundColor:"#F7C4BA")
 		}
-		standardTile("refresh", "device.switch", inactiveLabel: false, decoration: "flat") {
+
+		standardTile("switch", "device.switch", canChangeIcon: false, decoration: "flat" ) {
+       		state "on", label: 'On', action: "switch.off",
+          		icon: "st.switches.switch.on", backgroundColor: "#79b821"
+       		state("off", label: 'Off', action: "switch.on",
+          		icon: "st.switches.switch.off", backgroundColor: "#ffffff")
+		}
+        
+		standardTile("refresh", "device.switch", decoration: "flat") {
 			state("default", action:"refresh.refresh",        icon:"st.secondary.refresh")
 		}
+        
 		main "heatingSetpoint"
-		details(["heatingSetpoint", "heatLevelUp", "heatLevelDown", "refresh"])
+		details(["heatingSetpoint", "heatLevelUp", "heatLevelDown", "switch", "refresh"])
 	}
 }
 
@@ -61,6 +71,19 @@ def parse(String description) { }
 def poll() { updateDeviceData(parent.getDeviceData(this.device)) }
 
 def refresh() { parent.refresh() }
+
+def on() {
+	def deviceData = parent.getDeviceData(this.device).clone()
+    deviceData.enabled = true
+   	state.deviceData = deviceData
+	runIn(5, setDeviceMode, [overwrite: true])
+}
+def off() {
+	def deviceData = parent.getDeviceData(this.device).clone()
+    deviceData.enabled = false
+   	state.deviceData = deviceData
+	runIn(5, setDeviceMode, [overwrite: true])
+}
 
 def setHeatingSetpoint(Number heatingSetPoint) {
 	def actualData = parent.getDeviceData(this.device).clone()
@@ -125,6 +148,8 @@ def heatLevelDown() {
 def updateDeviceData(actualData) {
 	def deviceData = convertTemperatureUnit(actualData, getTemperatureScale())
 	sendEvent(name: "heatingSetpoint", value: deviceData.setPoint, unit: getTemperatureScale())
+    //log.info("updateDeviceData: ${deviceData.enabled} ${deviceData.mode}")
+    sendEvent(name: "switch", value: deviceData.enabled ? "on" : "off")
 }
 
 def convertTemperatureUnit(actualData = [], temperatureUnit) {
@@ -146,3 +171,4 @@ def convertTemperatureUnit(actualData = [], temperatureUnit) {
 }
 
 def setDeviceSetPoint() { parent.setDeviceSetPoint(this.device, state.deviceData) }
+def setDeviceMode() { parent.setDeviceMode(this.device, state.deviceData) }
