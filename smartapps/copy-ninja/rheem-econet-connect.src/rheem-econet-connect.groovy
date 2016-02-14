@@ -126,7 +126,8 @@ private getWaterHeaterList() {
             	device.WH.each { 
                 	def dni = [ app.id, "WaterHeater", it.EquipmentId ].join('|')
                 	log.debug "WaterHeater ${dni}: ${it.SetPoint}"
-                    state.data?.put(dni,[ 
+                    state.data?.put(dni,[
+                    	enabled: it.IsEnabled,
 						minTemp: it.MinTemp,
 						maxTemp: it.MaxTemp,
 						modesAvailable: it.ModesAvailable,
@@ -197,9 +198,20 @@ def setDeviceSetPoint(childDevice, deviceData = []) {
         ])
     }
 }
-def setDeviceSetPointDelay(setData) {
-	
+def setDeviceMode(childDevice, deviceData = []) {
+	log.info "setDeviceMode" 
+	state.data = deviceData.clone()
+	if (login()) {
+    	apiPost("/v3/eco/myequipmentattributes/savewhmode", [
+        	body: [
+            	EquipmentId: getDeviceID(childDevice),
+                IsEnabled: deviceData.enabled ? 1 : 0,
+                ConfigMode: deviceData.mode
+            ]
+        ])
+    }
 }
+
 def getDeviceID(childDevice) { return childDevice.deviceNetworkId.split("\\|")[2] }
 
 /* Access Management */
@@ -239,7 +251,7 @@ private apiGet(apiPath, apiParams = [], callback = {}) {
 		httpGet(apiParams) { response -> 
         	callback(response)
         }
-	}	catch (Error e)	{
+	}	catch (e)	{
 		log.debug "API Error: $e"
 	}
 }
@@ -256,10 +268,9 @@ private apiPost(apiPath, apiParams = [], callback = {}) {
 	
 	try {
 		httpPost(apiParams) { response -> 
-        	log.debug("response: ${response.data}")
         	callback(response)
         }
-	}	catch (Error e)	{
+	}	catch (e)	{
 		log.debug "API Error: $e"
 	}
 }
