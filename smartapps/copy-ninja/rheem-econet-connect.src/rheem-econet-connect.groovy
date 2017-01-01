@@ -41,8 +41,6 @@ def prefLogIn() {
 		} 
 		section("Advanced Options"){
 			input(name: "polling", title: "Server Polling (in Minutes)", type: "int", description: "in minutes", defaultValue: "5" )
-			paragraph "This option enables author to troubleshoot if you have problem adding devices. It allows the app to send information exchanged with Rheem EcoNet server to the author. DO NOT ENABLE unless you have contacted author at jason@copyninja.net"
-			input(name:"troubleshoot", title: "Troubleshoot", type: "boolean")
 		}
 	}
 }
@@ -78,24 +76,31 @@ def updated() {
 def uninstalled() {
 	unschedule()
     unsubscribe()
-	getAllChildDevices().each { deleteChildDevice(it.deviceNetworkId) }
+	getAllChildDevices().each { deleteChildDevice(it) }
 }	
 
 def initialize() {
 	// Set initial states
 	state.polling = [ last: 0, rescheduler: now() ]  
-	state.troubleshoot = null
-	state.data = [:]
-    state.setData = [:]
-
+	    
 	// Create selected devices
 	def waterHeaterList = getWaterHeaterList()
-	def selectedDevices = [] + getSelectedDevices("waterheater")
-	selectedDevices.each { (getChildDevice(it))?:addChildDevice("copy-ninja", "Rheem Econet Water Heater", it, null, ["name": "Rheem Econet: " + waterHeaterList[it]]) }
+    def selectedDevices = [] + getSelectedDevices("waterheater")
+    selectedDevices.each {
+    	def dev = getChildDevice(it)
+        def name  = waterHeaterList[it]
+        if (dev == null) {
+	        try {
+    			addChildDevice("copy-ninja", "Rheem Econet Water Heater", it, null, ["name": "Rheem Econet: " + name])
+    	    } catch (e)	{
+				log.debug "addChildDevice Error: $e"
+          	}
+        }
+    }
     
 	// Remove unselected devices
-	def deleteDevices = (selectedDevices) ? (getChildDevices().findAll { !selectedDevices.contains(it.deviceNetworkId) }) : getAllChildDevices()
-	deleteDevices.each { deleteChildDevice(it.deviceNetworkId) } 
+	/*def deleteDevices = (selectedDevices) ? (getChildDevices().findAll { !selectedDevices.contains(it.deviceNetworkId) }) : getAllChildDevices()
+	deleteDevices.each { deleteChildDevice(it.deviceNetworkId) } */
 	
 	//Subscribes to sunrise and sunset event to trigger refreshes
 	subscribe(location, "sunrise", runRefresh)
@@ -106,7 +111,6 @@ def initialize() {
 	    
 	//Refresh devices
 	runRefresh()
-	
 }
 
 def getSelectedDevices( settingsName ) {
@@ -120,25 +124,11 @@ def getSelectedDevices( settingsName ) {
 // Listing all the water heaters you have in Rheem EcoNet
 private getWaterHeaterList() { 	 
 	def deviceList = [:]
-	apiGet("/v3/eco/myequipmentcheck", [] ) { response ->
+	apiGet("/locations", [] ) { response ->
     	if (response.status == 200) {
-        	response.data.Equipment.each { device ->
-            	device.WH.each { 
-                	def dni = [ app.id, "WaterHeater", it.EquipmentId ].join('|')
-                	log.debug "WaterHeater ${dni}: ${it.SetPoint}"
-                    state.data?.put(dni,[
-                    	enabled: it.IsEnabled,
-						minTemp: it.MinTemp,
-						maxTemp: it.MaxTemp,
-						modesAvailable: it.ModesAvailable,
-						mode: it.Mode,
-						modeDisplay: it.ModeDisplay,
-						setPoint: it.SetPoint,
-						hotWaterAvailability: it.HotWaterAvailability,
-						hotWaterRecoveryMin: it.HotWaterRecoveryMin,
-						temperatureUnit: it.TemperatureDisplayMode
-                    ])
-                    deviceList.put(dni,it.SystemName)
+          	response.data.equipment[0].each { 
+            	if (it.type.equals("Water Heater")) {
+                	deviceList["" + it.id]= it.name
                 }
             }
         }
@@ -147,15 +137,26 @@ private getWaterHeaterList() {
 }
 
 // Refresh data
-def refresh() {		
-	if (updateData()) { 
-		log.info "Refreshing data..."
-        // update last refresh
-		state.polling?.last = now()
+def refresh() {
+	if (!login()) {
+    	return
+    }
+    
+	log.info "Refreshing data..."
+    // update last refresh
+	state.polling?.last = now()
 
-		// get all the children and send updates
-		getAllChildDevices().each { it.updateDeviceData(state.data?.get(it.deviceNetworkId)) }
-	}    
+	// get all the children and send updates
+	getAllChildDevices().each {
+    	def id = it.deviceNetworkId
+    	apiGet("/equipment/$id", [] ) { response ->
+    		if (response.status == 200) {
+            	log.debug "Got data: $response.data"
+            	it.updateDeviceData(response.data)
+            }
+        }
+
+    }
     
 	//schedule the rescheduler to schedule refresh ;)
 	if ((state.polling?.rescheduler?:0) + 2400000 < now()) {
@@ -164,9 +165,6 @@ def refresh() {
 		state.polling?.rescheduler = now()
 	}
 }
-
-// Updates data for devices
-private updateData() { return (login()) ? ((getWaterHeaterList())? true : false) : false }
 
 // Schedule refresh
 def runRefresh(evt) {
@@ -183,55 +181,62 @@ def runRefresh(evt) {
 	//Update rescheduler's last run
 	if (!evt) state.polling?.rescheduler = now()
 }
-// Get single device status
-def getDeviceData(childDevice) { return state.data?.get(childDevice.deviceNetworkId) }
-def getDeviceData(childDevice, dataName) { return state.data?.get(childDevice.deviceNetworkId)?.get(dataName) }
-def setDeviceSetPoint(childDevice, deviceData = []) { 
-	state.data = deviceData.clone()
+
+def setDeviceSetPoint(childDevice, setpoint) { 
+	log.info "setDeviceSetPoint: $childDevice.deviceNetworkId $setpoint" 
 	if (login()) {
-    	apiPost("/v3/eco/myequipmentattributes/savewhtemp", [
+    	apiPut("/equipment/$childDevice.deviceNetworkId", [
         	body: [
-            	TempDisplayMode: deviceData.temperatureUnit,
-                EquipmentId: getDeviceID(childDevice),
-                SetPoint: deviceData.setPoint
+                setPoint: setpoint,
             ]
         ])
     }
+
 }
-def setDeviceMode(childDevice, deviceData = []) {
-	log.info "setDeviceMode" 
-	state.data = deviceData.clone()
+def setDeviceEnabled(childDevice, enabled) {
+	log.info "setDeviceEnabled: $childDevice.deviceNetworkId $enabled" 
 	if (login()) {
-    	apiPost("/v3/eco/myequipmentattributes/savewhmode", [
+    	apiPut("/equipment/$childDevice.deviceNetworkId", [
         	body: [
-            	EquipmentId: getDeviceID(childDevice),
-                IsEnabled: deviceData.enabled ? 1 : 0,
-                ConfigMode: deviceData.mode
+                isEnabled: enabled,
             ]
         ])
     }
 }
 
-def getDeviceID(childDevice) { return childDevice.deviceNetworkId.split("\\|")[2] }
-
-/* Access Management */
-private login() { 
+private login() {
+	def apiParams = [
+    	uri: getApiURL(),
+        path: "/auth/token",
+        headers: ["Authorization": "Basic Y29tLnJoZWVtLmVjb25ldF9hcGk6c3RhYmxla2VybmVs"],
+        requestContentType: "application/x-www-form-urlencoded",
+        body: [
+        	username: settings.username,
+        	password: settings.password,
+        	"grant_type": "password"
+        ],
+    ]
     if (state.session?.expiration < now()) {
-    	def apiPath = (state.session?.refreshToken) ? "/v1/public/tokens/refresh" : "/v1/eco/authenticate"
-    	apiGet(apiPath, [] ) { response ->
-            if (response.status == 200) {
-                state.session = [ 
-                    accessToken: response.data.AccessToken,
-                    tokenType: response.data.TokenType,
-                    refreshToken: response.data.RefreshToken,
-                    expiration: now() + 150000
-                ]
-                return true
-            } else {
-                return false
-            }
-		} 
-    } else { 
+    	try {
+			httpPost(apiParams) { response -> 
+            	if (response.status == 200) {
+                	log.debug "Login good!"
+                	state.session = [ 
+                    	accessToken: response.data.access_token,
+                    	refreshToken: response.data.refresh_token,
+                    	expiration: now() + 150000
+                	]
+                	return true
+            	} else {
+                	return false
+            	} 	
+        	}
+		}	catch (e)	{
+			log.debug "API Error: $e"
+        	return false
+		}
+	} else { 
+    	// TODO: do a refresh 
 		return true
 	}
 }
@@ -243,10 +248,10 @@ private apiGet(apiPath, apiParams = [], callback = {}) {
 	apiParams = [ 
 		uri: getApiURL(),
 		path: apiPath,
-        headers: ["Authorization": getApiAuth(), "X-ClientID": getApiClientID(), "X-Timestamp":now()],
+        headers: ["Authorization": getApiAuth()],
         requestContentType: "application/json",
 	] + apiParams
-	
+	log.debug "GET: $apiParams"
 	try {
 		httpGet(apiParams) { response -> 
         	callback(response)
@@ -256,18 +261,18 @@ private apiGet(apiPath, apiParams = [], callback = {}) {
 	}
 }
 
-// HTTP POST call
-private apiPost(apiPath, apiParams = [], callback = {}) {	
+// HTTP PUT call
+private apiPut(apiPath, apiParams = [], callback = {}) {	
 	// set up parameters
 	apiParams = [ 
 		uri: getApiURL(),
 		path: apiPath,
-        headers: ["Authorization": getApiAuth(), "X-ClientID": getApiClientID(), "X-Timestamp":now()],
+        headers: ["Authorization": getApiAuth()],
         requestContentType: "application/json",
 	] + apiParams
 	
 	try {
-		httpPost(apiParams) { response -> 
+		httpPut(apiParams) { response -> 
         	callback(response)
         }
 	}	catch (e)	{
@@ -275,21 +280,10 @@ private apiPost(apiPath, apiParams = [], callback = {}) {
 	}
 }
 
-private getApiClientID() { return "4890422047775.apps.rheemapi.com" }
 private getApiURL() { 
-	def troubleshoot = "false"
-	if (settings.troubleshoot == "true") {
-		if (!(state.troubleshoot)) state.troubleshoot = now() + 3600000 
-		troubleshoot = (state.troubleshoot > now()) ? "true" : "false"
-	}
-	return (troubleshoot == "true") ? "https://io-myrheem-com-uyg33xguwugq.runscope.net" : "https://io.myrheem.com" }
+	return "https://econet-api.rheemcert.com"
+}
+    
 private getApiAuth() {
-	if (!((state.session?.refreshToken)||(state.session?.refreshToken=="INVALID TOKEN"))) {
-		def basicAuth = settings.username + ":" + settings.password
-		return "Basic " + basicAuth.encodeAsBase64()
-	} else if (state.session?.expiration < now()) {
-		return "Refresh: " + state.session?.refreshToken
-	} else {
-		return state.session?.tokenType + ": " + state.session?.accessToken
-	}
+	return "Bearer " + state.session?.accessToken
 }
