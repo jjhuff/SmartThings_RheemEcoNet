@@ -12,7 +12,7 @@
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
  *
- *  Last Updated : 1/1/17
+ *  Last Updated : 2017-01-04
  *
  *  Based on https://github.com/copy-ninja/SmartThings_RheemEcoNet
  */
