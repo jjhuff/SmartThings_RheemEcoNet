@@ -19,7 +19,6 @@
 metadata {
 	definition (name: "Rheem Econet Water Heater", namespace: "jjhuff", author: "Justin Huff") {
 		capability "Actuator"
-		capability "Polling"
 		capability "Refresh"
 		capability "Sensor"
         capability "Switch"
@@ -70,10 +69,6 @@ metadata {
 
 def parse(String description) { }
 
-//def poll() {
-	//updateDeviceData(parent.getDeviceData(this.device))
-//}
-
 def refresh() {
 	log.debug "refresh"
 	parent.refresh()
@@ -89,7 +84,7 @@ def off() {
     sendEvent(name: "switch", value: "off")
 }
 
-def setSetPoint(Number setPoint) {
+def setHeatingSetpoint(Number setPoint) {
 	/*heatingSetPoint = (heatingSetPoint < deviceData.minTemp)? deviceData.minTemp : heatingSetPoint
 	heatingSetPoint = (heatingSetPoint > deviceData.maxTemp)? deviceData.maxTemp : heatingSetPoint
     */
@@ -100,13 +95,13 @@ def setSetPoint(Number setPoint) {
 def heatLevelUp() { 
 	def setPoint = device.currentValue("heatingSetpoint")
     setPoint = setPoint + 1
-	setSetPoint(setPoint)
+	setHeatingSetpoint(setPoint)
 }	
 
 def heatLevelDown() { 
 	def setPoint = device.currentValue("heatingSetpoint")
     setPoint = setPoint - 1
-    setSetPoint(setPoint)
+    setHeatingSetpoint(setPoint)
 }
 
 def updateDeviceData(data) {
