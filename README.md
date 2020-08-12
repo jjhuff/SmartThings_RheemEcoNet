@@ -1,6 +1,8 @@
 SmartThings Rheem EcoNet
 ===============
 
+NOTE: this doesn't work anymore due to changes in Rheem's API.
+
 This is based on https://github.com/copy-ninja/SmartThings_RheemEcoNet with updates for the new API
 
 SmartThings installation instructions:
